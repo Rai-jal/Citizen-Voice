@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "citizenvoice",
+    "slug": "citizenvoice",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "citizenvoice",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rai.citizenvoice",
+
+      /* 👇 Add this block to explain permissions to iOS users */
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Allow CitizenVoice to record audio for reports.",
+        "NSPhotoLibraryUsageDescription": "Allow CitizenVoice to access your photos and videos for attaching evidence."
+      }
+    },
+
+    "android": {
+      "package": "com.rai.citizenvoice",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+
+      /* 👇 Add these Android permission settings */
+      "permissions": [
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+
+    /* 👇 Modify plugin section to include image-picker plugin with photo permission */
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow CitizenVoice to access your photos for attaching report evidence."
+        }
+      ]
+    ],
+
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
