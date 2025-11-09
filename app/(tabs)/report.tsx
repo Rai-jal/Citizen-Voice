@@ -193,21 +193,28 @@ export default function ReportScreen() {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser();
-
       if (userError) throw userError;
       if (!user && !isAnonymous)
         throw new Error("User not authenticated. Enable anonymous mode.");
 
-      // 1️⃣ Insert report
+      // 1️⃣ Upload attachments first
+      const uploadedFiles = [];
+      for (const a of attachments) {
+        const filePath = await uploadFile(a);
+        uploadedFiles.push({ name: a.name, path: filePath, type: a.type });
+      }
+
+      // 2️⃣ Insert report with status = "pending"
       const { data: reportData, error: reportError } = await supabase
         .from("reports")
         .insert([
           {
-            title: complaintTitle,
-            description: complaintDescription,
+            title: complaintTitle.trim(),
+            description: complaintDescription.trim(),
             location: location || null,
             user_id: isAnonymous ? null : user?.id,
             is_anonymous: isAnonymous,
+            status: "pending", // ✅ key addition
           },
         ])
         .select()
@@ -215,30 +222,32 @@ export default function ReportScreen() {
 
       if (reportError) throw reportError;
 
-      // 2️⃣ Upload each attachment
-      for (const a of attachments) {
-        const filePath = await uploadFile(a);
+      // 3️⃣ Link attachments
+      if (uploadedFiles.length > 0) {
         const { error: attachError } = await supabase
           .from("report_attachments")
-          .insert([
-            {
+          .insert(
+            uploadedFiles.map((f) => ({
               report_id: reportData.id,
-              name: a.name,
-              path: filePath,
-              type: a.type,
-            },
-          ]);
+              name: f.name,
+              path: f.path,
+              type: f.type,
+            }))
+          );
         if (attachError) throw attachError;
       }
 
-      // 3️⃣ Reset
+      // 4️⃣ Reset form
       setComplaintTitle("");
       setComplaintDescription("");
       setLocation("");
       setAttachments([]);
       setIsAnonymous(false);
 
-      Alert.alert("Success", "Report submitted successfully!");
+      Alert.alert(
+        "Report Submitted",
+        "Your report has been submitted and is pending admin approval."
+      );
     } catch (error: any) {
       console.error("Submit Error:", error.message || error);
       Alert.alert("Error", error.message || "Submission failed.");
@@ -385,6 +394,13 @@ export default function ReportScreen() {
               {isSubmitting ? "Submitting..." : "Submit Report"}
             </Text>
           </TouchableOpacity>
+
+          {/* Optional: Status note */}
+          {isSubmitting && (
+            <Text className="text-center text-sm text-gray-500 mt-3">
+              Uploading your report and attachments...
+            </Text>
+          )}
         </View>
       </ScrollView>
     </View>

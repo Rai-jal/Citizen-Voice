@@ -1,11 +1,19 @@
 import { Audio } from "expo-av";
 import { useRouter } from "expo-router";
-import { Mic, Search, User } from "lucide-react-native";
+import {
+  FileText,
+  LogOut,
+  Mic,
+  Search,
+  Settings,
+  Video as VideoIcon,
+} from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
-  Linking,
+  Image,
   ScrollView,
   Text,
   TextInput,
@@ -17,22 +25,21 @@ import { supabase } from "../../lib/supabase";
 export default function HomeScreen() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
-  const [language, setLanguage] = useState("Krio");
   const [isListening, setIsListening] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
-
-  const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const [user, setUser] = useState<any>(null);
 
   const [newsItems, setNewsItems] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [opportunities, setOpportunities] = useState<any[]>([]);
+  const [reports, setReports] = useState<any[]>([]);
+
   const [loadingNews, setLoadingNews] = useState(true);
   const [loadingServices, setLoadingServices] = useState(true);
   const [loadingOpportunities, setLoadingOpportunities] = useState(true);
-  const [user, setUser] = useState<any>(null);
-
-  const languages = ["Krio", "Mende", "Temne", "Limba", "Fullah", "English"];
+  const [loadingReports, setLoadingReports] = useState(true);
 
   const recordingOptions = {
     android: {
@@ -53,24 +60,37 @@ export default function HomeScreen() {
       linearPCMIsBigEndian: false,
       linearPCMIsFloat: false,
     },
-    web: {
-      mimeType: "audio/webm",
-      bitsPerSecond: 128000,
-    },
+    web: { mimeType: "audio/webm", bitsPerSecond: 128000 },
   };
 
+  // -------------------------------
+  // Helper
+  // -------------------------------
+  const getInitials = (email: string) => {
+    const [first, last] = email.split("@")[0].split(".");
+    return ((first?.[0] ?? "") + (last?.[0] ?? "")).toUpperCase();
+  };
+
+  // -------------------------------
+  // Fetch User
+  // -------------------------------
   useEffect(() => {
     const fetchUser = async () => {
       const { data } = await supabase.auth.getUser();
-      setUser(data?.user);
+      if (!data?.user) router.replace("/(auth)/login");
+      else setUser(data.user);
     };
     fetchUser();
   }, []);
 
+  // -------------------------------
+  // Fetch Data
+  // -------------------------------
   useEffect(() => {
     fetchNews();
     fetchServices();
     fetchOpportunities();
+    fetchReports();
   }, []);
 
   const fetchNews = async () => {
@@ -79,14 +99,16 @@ export default function HomeScreen() {
       .from("news")
       .select("*")
       .order("date", { ascending: false });
-    if (!error) setNewsItems(data || []);
+    if (error) console.error(error);
+    setNewsItems(data || []);
     setLoadingNews(false);
   };
 
   const fetchServices = async () => {
     setLoadingServices(true);
     const { data, error } = await supabase.from("services").select("*");
-    if (!error) setServices(data || []);
+    if (error) console.error(error);
+    setServices(data || []);
     setLoadingServices(false);
   };
 
@@ -96,28 +118,53 @@ export default function HomeScreen() {
       .from("opportunities")
       .select("*")
       .order("deadline", { ascending: true });
-    if (!error) setOpportunities(data || []);
+    if (error) console.error(error);
+    setOpportunities(data || []);
     setLoadingOpportunities(false);
   };
 
-  const handleSearch = (query: string) => {
-    const lower = query.toLowerCase();
-    setSearchQuery(query);
-    setNewsItems((prev) =>
-      prev.filter(
-        (item) =>
-          item.title.toLowerCase().includes(lower) ||
-          item.summary.toLowerCase().includes(lower)
-      )
-    );
+  const fetchReports = async () => {
+    setLoadingReports(true);
+    const { data, error } = await supabase
+      .from("reports")
+      .select("*")
+      .eq("status", "approved")
+      .order("created_at", { ascending: false });
+    if (error) console.error(error);
+    setReports(data || []);
+    setLoadingReports(false);
   };
 
+  // -------------------------------
+  // Search
+  // -------------------------------
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    const lower = query.toLowerCase();
+
+    const filterItems = (items: any[], keys: string[]) =>
+      items.filter((item) =>
+        keys.some((key) => (item[key] ?? "").toLowerCase().includes(lower))
+      );
+
+    setNewsItems((prev) => filterItems(prev, ["title", "summary"]));
+    setServices((prev) => filterItems(prev, ["name", "description"]));
+    setOpportunities((prev) => filterItems(prev, ["title", "description"]));
+    setReports((prev) => filterItems(prev, ["title", "description"]));
+  };
+
+  // -------------------------------
+  // Voice Recording
+  // -------------------------------
   const startRecording = async () => {
     try {
       setIsListening(true);
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== "granted")
-        return alert("Microphone permission is required");
+        return Alert.alert(
+          "Permission required",
+          "Microphone permission is required"
+        );
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -136,7 +183,6 @@ export default function HomeScreen() {
 
   const stopRecording = async () => {
     if (!recording) return;
-
     try {
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI()!;
@@ -158,12 +204,8 @@ export default function HomeScreen() {
           body: formData,
         }
       );
-
       const data = await res.json();
-      if (data.text) {
-        setSearchQuery(data.text);
-        handleSearch(data.text);
-      }
+      if (data.text) handleSearch(data.text);
     } catch (err) {
       console.error(err);
     } finally {
@@ -171,18 +213,76 @@ export default function HomeScreen() {
     }
   };
 
+  // -------------------------------
+  // Logout
+  // -------------------------------
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
     setShowProfileMenu(false);
     if (!error) router.replace("/(auth)/login");
   };
 
+  // -------------------------------
+  // Render Functions
+  // -------------------------------
+  const renderReportItem = ({ item }: { item: any }) => (
+    <TouchableOpacity
+      onPress={() => router.push(`../report/${item.id}`)}
+      className="bg-white rounded-xl p-4 mb-4 shadow-sm border border-gray-100"
+    >
+      <Text className="text-lg font-bold text-gray-900 mb-2">{item.title}</Text>
+      <Text className="text-gray-700 mb-2">{item.description}</Text>
+      {item.location && (
+        <Text className="text-gray-500 text-sm">Location: {item.location}</Text>
+      )}
+      <Text className="text-gray-400 text-xs mb-2">
+        {item.is_anonymous
+          ? "Anonymous"
+          : `Submitted by User ID: ${item.user_id}`}
+      </Text>
+
+      {/* Attachments if any */}
+      {item.attachments && item.attachments.length > 0 && (
+        <ScrollView horizontal className="mb-2">
+          {item.attachments.map((att: any) => (
+            <View key={att.id} className="mr-3">
+              {att.type === "image" && (
+                <Image
+                  source={{ uri: att.path }}
+                  className="w-24 h-24 rounded-lg"
+                />
+              )}
+              {att.type === "video" && (
+                <View className="w-24 h-24 bg-black items-center justify-center rounded-lg">
+                  <VideoIcon size={24} color="white" />
+                </View>
+              )}
+              {att.type === "audio" && (
+                <View className="w-24 h-24 bg-green-100 items-center justify-center rounded-lg">
+                  <Mic size={24} color="green" />
+                </View>
+              )}
+              {att.type === "document" && (
+                <View className="w-24 h-24 bg-gray-100 items-center justify-center rounded-lg">
+                  <FileText size={24} color="gray" />
+                </View>
+              )}
+            </View>
+          ))}
+        </ScrollView>
+      )}
+    </TouchableOpacity>
+  );
+
   const renderNewsItem = ({ item }: { item: any }) => (
-    <View className="bg-white rounded-xl p-4 mb-4 shadow-sm border border-gray-100">
+    <TouchableOpacity
+      onPress={() => router.push(`/news/${item.id}`)}
+      className="bg-white rounded-xl p-4 mb-4 shadow-sm border border-gray-100"
+    >
       <Text className="text-lg font-bold text-gray-900 mb-2">{item.title}</Text>
       <Text className="text-gray-600 mb-3">{item.summary}</Text>
       <Text className="text-gray-400 text-sm">{item.date}</Text>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderServiceItem = ({ item }: { item: any }) => (
@@ -196,17 +296,7 @@ export default function HomeScreen() {
       <Text className="text-gray-900 font-semibold text-center mb-2">
         {item.name}
       </Text>
-
-      {/* Learn More as blue text */}
-      <TouchableOpacity
-        onPress={() => {
-          if (item.documentUrl) {
-            Linking.openURL(item.documentUrl);
-          } else {
-            alert("Document not available");
-          }
-        }}
-      >
+      <TouchableOpacity onPress={() => router.push(`/services/${item.id}`)}>
         <Text className="text-blue-600 text-sm font-medium">Learn More</Text>
       </TouchableOpacity>
     </View>
@@ -217,12 +307,19 @@ export default function HomeScreen() {
       <Text className="text-lg font-bold text-gray-900 mb-1">{item.title}</Text>
       <Text className="text-gray-700 mb-2">{item.organization}</Text>
       <View className="flex-row justify-between items-center">
-        <Text className="text-blue-600 font-medium">Apply now</Text>
+        <TouchableOpacity
+          onPress={() => router.push(`/opportunities/${item.id}`)}
+        >
+          <Text className="text-blue-600 font-medium">Apply now</Text>
+        </TouchableOpacity>
         <Text className="text-gray-500 text-sm">Deadline: {item.deadline}</Text>
       </View>
     </View>
   );
 
+  // -------------------------------
+  // Render Main
+  // -------------------------------
   return (
     <View className="flex-1 bg-gray-50">
       {/* Header */}
@@ -232,33 +329,37 @@ export default function HomeScreen() {
             className="text-xl font-bold text-gray-900 flex-shrink"
             numberOfLines={1}
           >
-            Hello{" "}
-            {user?.user_metadata?.name
-              ? user.user_metadata.name
-              : user?.email
-              ? user.email.split("@")[0]
-              : "Guest"}
+            Hello {user?.email ? getInitials(user.email) : "User"}
           </Text>
 
           {/* Profile */}
           <View style={{ position: "relative" }}>
             <TouchableOpacity
-              className="bg-blue-100 p-2 rounded-full"
               onPress={() => setShowProfileMenu(!showProfileMenu)}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 24,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: "#3B82F6",
+              }}
             >
-              <User size={24} color="#3B82F6" />
+              <Text className="text-white font-bold text-lg">
+                {user ? getInitials(user.email) : "U"}
+              </Text>
             </TouchableOpacity>
 
             {showProfileMenu && (
               <View
                 style={{
                   position: "absolute",
-                  top: 45,
+                  top: 55,
                   right: 0,
-                  width: 180,
+                  width: 160,
                   backgroundColor: "white",
                   borderRadius: 12,
-                  padding: 8,
+                  paddingVertical: 8,
                   shadowColor: "#000",
                   shadowOpacity: 0.1,
                   shadowOffset: { width: 0, height: 2 },
@@ -268,63 +369,40 @@ export default function HomeScreen() {
                 }}
               >
                 <TouchableOpacity
-                  style={{ padding: 10 }}
-                  onPress={() => setShowLangDropdown(!showLangDropdown)}
-                >
-                  <Text className="text-gray-700 font-medium">
-                    🌐 Change Language
-                  </Text>
-                </TouchableOpacity>
-
-                {showLangDropdown && (
-                  <View className="bg-gray-50 rounded-md p-2 mt-1">
-                    {languages.map((lang) => (
-                      <TouchableOpacity
-                        key={lang}
-                        onPress={() => {
-                          setLanguage(lang);
-                          setShowLangDropdown(false);
-                        }}
-                        style={{
-                          paddingVertical: 6,
-                          paddingHorizontal: 8,
-                          borderRadius: 6,
-                        }}
-                      >
-                        <Text className="text-gray-800">{lang}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-
-                <TouchableOpacity
-                  style={{ padding: 10 }}
-                  onPress={() => {
-                    setShowProfileMenu(false);
-                    router.push("/settings");
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    padding: 12,
                   }}
+                  onPress={() => router.push("/settings")}
                 >
-                  <Text className="text-gray-700 font-medium">⚙️ Settings</Text>
+                  <Settings size={20} color="#4B5563" className="mr-2" />
+                  <Text className="text-gray-700 font-medium">Settings</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={{ padding: 10 }}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    padding: 12,
+                  }}
                   onPress={handleLogout}
                 >
-                  <Text className="text-red-600 font-semibold">🚪 Logout</Text>
+                  <LogOut size={20} color="#EF4444" className="mr-2" />
+                  <Text className="text-red-600 font-semibold">Logout</Text>
                 </TouchableOpacity>
               </View>
             )}
           </View>
         </View>
 
-        {/* Search Bar */}
+        {/* Search */}
         <View className="flex-row items-center mb-4">
           <View className="flex-1 flex-row items-center bg-gray-100 rounded-full px-4 py-3">
             <Search size={20} color="#6B7280" className="mr-2" />
             <TextInput
               className="flex-1 text-gray-800"
-              placeholder="Search services, news, opportunities..."
+              placeholder="Search news, services, opportunities..."
               value={searchQuery}
               onChangeText={handleSearch}
             />
@@ -337,7 +415,7 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Main Content */}
+      {/* Content */}
       <ScrollView className="flex-1 px-6 py-4">
         {/* News */}
         <View className="mb-8">
@@ -388,6 +466,26 @@ export default function HomeScreen() {
               keyExtractor={(item) => item.id.toString()}
               scrollEnabled={false}
             />
+          )}
+        </View>
+        {/* Reports Feed */}
+        <View className="mb-8">
+          <Text className="text-xl font-bold text-gray-900 mb-4">
+            Community Reports
+          </Text>
+          {loadingReports ? (
+            <ActivityIndicator size="small" color="#3B82F6" />
+          ) : reports.length > 0 ? (
+            <FlatList
+              data={reports}
+              renderItem={renderReportItem}
+              keyExtractor={(item) => item.id.toString()}
+              scrollEnabled={false}
+            />
+          ) : (
+            <Text className="text-gray-500 text-center">
+              No approved reports yet.
+            </Text>
           )}
         </View>
       </ScrollView>
