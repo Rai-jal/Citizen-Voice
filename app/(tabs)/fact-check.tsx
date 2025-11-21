@@ -22,15 +22,28 @@ import {
 } from "react-native";
 import uuid from "react-native-uuid";
 import { supabase } from "../../lib/supabase";
+import {
+  sanitizeUserInput,
+  validateFactCheckClaim,
+  validateFileSize,
+  validateFileType,
+} from "../../lib/validation";
+import {
+  factChecksService,
+  storageService,
+} from "../../services/supabaseService";
+import type { FactCheck, FileUpload } from "../../types";
 
 export default function FactCheckScreen() {
   const [claimText, setClaimText] = useState("");
-  const [attachments, setAttachments] = useState<any[]>([]);
+  const [attachments, setAttachments] = useState<FileUpload[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [recentChecks, setRecentChecks] = useState<any[]>([]);
+  const [recentChecks, setRecentChecks] = useState<FactCheck[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [claimError, setClaimError] = useState<string | undefined>();
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     Audio.requestPermissionsAsync();
@@ -39,13 +52,16 @@ export default function FactCheckScreen() {
 
   // 📡 Fetch recent checks
   const fetchFactChecks = async () => {
-    const { data, error } = await supabase
-      .from("fact_checks")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(10);
+    setIsLoading(true);
+    const { data, error } = await factChecksService.getAll();
 
-    if (!error && data) setRecentChecks(data);
+    if (error) {
+      Alert.alert("Error", `Failed to fetch fact checks: ${error.message}`);
+      setRecentChecks([]);
+    } else {
+      setRecentChecks(data);
+    }
+    setIsLoading(false);
   };
 
   // 🎙️ Record audio
@@ -91,6 +107,32 @@ export default function FactCheckScreen() {
     try {
       const result = await DocumentPicker.getDocumentAsync({ type: "*/*" });
       if (result.type === "success") {
+        // Validate file type
+        const typeValidation = validateFileType(result.name, [
+          "document",
+          "image",
+          "video",
+        ]);
+        if (!typeValidation.isValid) {
+          Alert.alert(
+            "Invalid File",
+            typeValidation.error || "File type not allowed"
+          );
+          return;
+        }
+
+        // Validate file size
+        if (result.size) {
+          const sizeValidation = validateFileSize(result.size, 10); // 10MB limit
+          if (!sizeValidation.isValid) {
+            Alert.alert(
+              "File Too Large",
+              sizeValidation.error || "File size exceeds limit"
+            );
+            return;
+          }
+        }
+
         setAttachments((prev) => [
           ...prev,
           {
@@ -98,29 +140,51 @@ export default function FactCheckScreen() {
             uri: result.uri,
             name: result.name,
             type: "document",
+            size: result.size,
           },
         ]);
       }
 
       const img = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
+        allowsEditing: false,
+        quality: 0.8,
       });
 
       if (!img.canceled && img.assets?.length) {
         const file = img.assets[0];
+        const fileName =
+          file.fileName || `media_${Date.now()}.${file.type || "jpg"}`;
+        const fileType = file.type === "video" ? "video" : "image";
+
+        // Validate file size
+        if (file.fileSize) {
+          const maxSize = fileType === "video" ? 50 : 10; // 50MB for videos, 10MB for images
+          const sizeValidation = validateFileSize(file.fileSize, maxSize);
+          if (!sizeValidation.isValid) {
+            Alert.alert(
+              "File Too Large",
+              sizeValidation.error || "File size exceeds limit"
+            );
+            return;
+          }
+        }
+
         setAttachments((prev) => [
           ...prev,
           {
             id: uuid.v4().toString(),
             uri: file.uri,
-            name: file.fileName || "media",
-            type: file.type || "image",
+            name: fileName,
+            type: fileType,
+            size: file.fileSize,
           },
         ]);
       }
     } catch (error) {
-      console.error("Upload error:", error);
-      Alert.alert("Error", "Failed to upload file.");
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred";
+      Alert.alert("Error", `Failed to upload file: ${errorMessage}`);
     }
   };
 
@@ -130,24 +194,57 @@ export default function FactCheckScreen() {
   };
 
   // ☁️ Upload file to Supabase
-  const uploadFile = async (file: any) => {
-    const ext = file.name.split(".").pop();
-    const fileName = `${uuid.v4()}.${ext}`;
-    const filePath = `fact-checks/${fileName}`;
+  const uploadFile = async (file: FileUpload): Promise<string> => {
+    try {
+      const ext = file.name.split(".").pop() || "bin";
+      const fileName = `${uuid.v4()}.${ext}`;
+      const filePath = `fact-checks/${fileName}`;
 
-    const response = await fetch(file.uri);
-    const blob = await response.blob();
+      const response = await fetch(file.uri);
+      if (!response.ok) {
+        throw new Error(`Failed to read file: ${response.statusText}`);
+      }
 
-    const { error } = await supabase.storage
-      .from("fact-checks")
-      .upload(filePath, blob);
-    if (error) throw error;
-    return filePath;
+      const blob = await response.blob();
+
+      const { data, error } = await storageService.uploadFile(
+        "fact-checks",
+        filePath,
+        blob,
+        { contentType: blob.type || "application/octet-stream" }
+      );
+
+      if (error) {
+        throw new Error(`Failed to upload file: ${error.message}`);
+      }
+
+      return data || filePath;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred";
+      throw new Error(`File upload failed: ${errorMessage}`);
+    }
   };
 
   // 🚀 Submit claim
   const handleSubmit = async () => {
-    if (!claimText && attachments.length === 0) {
+    // Clear previous errors
+    setClaimError(undefined);
+
+    // Validate claim text (if provided)
+    if (claimText) {
+      const validation = validateFactCheckClaim(claimText);
+      if (!validation.isValid) {
+        setClaimError(validation.error);
+        Alert.alert(
+          "Validation Error",
+          validation.error || "Please check the claim field."
+        );
+        return;
+      }
+    }
+
+    if (!claimText.trim() && attachments.length === 0) {
       Alert.alert("Error", "Please provide a claim or upload a file.");
       return;
     }
@@ -155,31 +252,60 @@ export default function FactCheckScreen() {
     try {
       setIsUploading(true);
 
+      // Get current user
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError) {
+        throw new Error(`Authentication error: ${userError.message}`);
+      }
+
+      // Sanitize claim text
+      const sanitizedClaim = claimText
+        ? sanitizeUserInput(claimText.trim())
+        : "Untitled Claim";
+
       // Upload files
-      const uploaded = [];
-      for (const a of attachments) {
-        const path = await uploadFile(a);
-        uploaded.push({ name: a.name, path, type: a.type });
+      const uploaded: Array<{ name: string; path: string; type: string }> = [];
+      for (const attachment of attachments) {
+        try {
+          const path = await uploadFile(attachment);
+          uploaded.push({ name: attachment.name, path, type: attachment.type });
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Unknown error";
+          Alert.alert(
+            "Upload Error",
+            `Failed to upload ${attachment.name}: ${errorMessage}`
+          );
+          // Continue with other files
+        }
       }
 
       // Save fact-check record
-      const { error } = await supabase.from("fact_checks").insert([
-        {
-          title: claimText || "Untitled Claim",
-          attachments: uploaded,
-          verdict: "pending",
-        },
-      ]);
+      const { data, error } = await factChecksService.create({
+        title: sanitizedClaim,
+        description: claimText || undefined,
+        verdict: "queued", // New submissions start as "queued"
+        user_id: user?.id,
+        attachments: uploaded.length > 0 ? uploaded : undefined,
+      });
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(`Failed to create fact check: ${error.message}`);
+      }
 
-      Alert.alert("Success", "Claim submitted and pending verification!");
+      Alert.alert("Success", "Claim submitted and queued for verification!");
       setClaimText("");
       setAttachments([]);
+      setClaimError(undefined);
       fetchFactChecks();
     } catch (error) {
-      console.error("Submission error:", error);
-      Alert.alert("Error", "Submission failed.");
+      const errorMessage =
+        error instanceof Error ? error.message : "Submission failed";
+      Alert.alert("Error", errorMessage);
     } finally {
       setIsUploading(false);
     }
@@ -197,13 +323,23 @@ export default function FactCheckScreen() {
         </Text>
 
         {/* Input */}
-        <TextInput
-          placeholder="Write your claim here..."
-          value={claimText}
-          onChangeText={setClaimText}
-          className="bg-white p-3 rounded-xl text-gray-900 mb-3 border border-gray-200"
-          multiline
-        />
+        <View className="mb-3">
+          <TextInput
+            placeholder="Write your claim here..."
+            value={claimText}
+            onChangeText={(text) => {
+              setClaimText(text);
+              setClaimError(undefined);
+            }}
+            className={`bg-white p-3 rounded-xl text-gray-900 border ${
+              claimError ? "border-red-500" : "border-gray-200"
+            }`}
+            multiline
+          />
+          {claimError && (
+            <Text className="text-red-500 text-sm mt-1 ml-1">{claimError}</Text>
+          )}
+        </View>
 
         {/* Attachments */}
         <View className="mb-3">
@@ -282,31 +418,52 @@ export default function FactCheckScreen() {
         <Text className="text-lg font-semibold text-gray-800 mb-2">
           Recent Fact Checks
         </Text>
-        {recentChecks.length === 0 ? (
+        {isLoading ? (
+          <ActivityIndicator size="small" color="#3B82F6" />
+        ) : recentChecks.length === 0 ? (
           <Text className="text-gray-500 text-center py-3">
             No submissions yet.
           </Text>
         ) : (
-          recentChecks.map((item) => (
-            <View
-              key={item.id}
-              className="bg-white p-4 mb-2 rounded-xl flex-row justify-between items-center shadow-sm"
-            >
-              <View>
-                <Text className="font-semibold text-gray-900">
-                  {item.title}
-                </Text>
-                <Text className="text-sm text-gray-500">{item.verdict}</Text>
+          recentChecks
+            .filter((item) =>
+              item.title.toLowerCase().includes(searchQuery.toLowerCase())
+            )
+            .map((item) => (
+              <View
+                key={item.id}
+                className="bg-white p-4 mb-2 rounded-xl flex-row justify-between items-center shadow-sm"
+              >
+                <View className="flex-1">
+                  <Text className="font-semibold text-gray-900">
+                    {item.title}
+                  </Text>
+                  <Text className="text-sm text-gray-500">
+                    {item.verdict === "queued"
+                      ? "Queued"
+                      : item.verdict === "in-progress"
+                      ? "In Progress"
+                      : item.verdict === "verified"
+                      ? "Verified"
+                      : item.verdict === "disputed"
+                      ? "Disputed"
+                      : item.verdict === "needs-review"
+                      ? "Needs Review"
+                      : item.verdict}
+                  </Text>
+                </View>
+                {item.verdict === "verified" ? (
+                  <CheckCircle color="#10B981" size={20} />
+                ) : item.verdict === "disputed" ? (
+                  <AlertTriangle color="#EF4444" size={20} />
+                ) : item.verdict === "in-progress" ||
+                  item.verdict === "needs-review" ? (
+                  <Clock color="#F59E0B" size={20} />
+                ) : (
+                  <Clock color="#6B7280" size={20} />
+                )}
               </View>
-              {item.verdict === "approved" ? (
-                <CheckCircle color="#10B981" size={20} />
-              ) : item.verdict === "rejected" ? (
-                <AlertTriangle color="#EF4444" size={20} />
-              ) : (
-                <Clock color="#F59E0B" size={20} />
-              )}
-            </View>
-          ))
+            ))
         )}
       </ScrollView>
     </View>

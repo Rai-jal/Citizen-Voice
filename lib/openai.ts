@@ -1,25 +1,20 @@
-import OpenAI from "openai";
+/**
+ * DEPRECATED: OpenAI client-side usage
+ *
+ * ⚠️ SECURITY WARNING: This file is deprecated.
+ * OpenAI API keys should NEVER be in client-side code.
+ *
+ * All OpenAI functionality has been moved to Supabase Edge Functions:
+ * - Transcription: Use apiService.transcribeAudio()
+ * - Chat: Use apiService.sendChatMessage()
+ * - Translation: Use apiService.translateText()
+ *
+ * See lib/apiService.ts for the new implementation.
+ */
 
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-export const translateText = async (text: string, targetLanguage: string) => {
-  if (targetLanguage === "English") return text;
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `Translate the following text into ${targetLanguage} while keeping the meaning accurate.`,
-        },
-        { role: "user", content: text },
-      ],
-      max_tokens: 500,
-    });
-    return response.choices[0].message?.content || text;
-  } catch (err) {
-    console.error("Translation error:", err);
-    return text;
-  }
-};
+// Re-export the API service functions for backward compatibility
+export { translateText } from "./apiService";
+
+// Note: The OpenAI client is no longer used in client code
+// All AI operations are now handled by Supabase Edge Functions
+// where the API key is stored securely

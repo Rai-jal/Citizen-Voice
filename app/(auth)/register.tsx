@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { validateEmail, validatePassword } from "../../lib/validation";
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -21,18 +22,51 @@ export default function RegisterScreen() {
   const [termsAccepted, setTermsAccepted] = useState(false);
 
   const handleRegister = async () => {
+    // Validate terms acceptance
     if (!termsAccepted) {
       Alert.alert(
         "Terms Required",
-        "Please accept the Terms of Service and Privacy Policy.",
+        "Please accept the Terms of Service and Privacy Policy."
+      );
+      return;
+    }
+
+    // Validate email
+    if (!email || !email.trim()) {
+      Alert.alert("Validation Error", "Please enter your email address");
+      return;
+    }
+
+    if (!validateEmail(email)) {
+      Alert.alert("Validation Error", "Please enter a valid email address");
+      return;
+    }
+
+    // Validate password
+    if (!password || password.length === 0) {
+      Alert.alert("Validation Error", "Please enter a password");
+      return;
+    }
+
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.isValid) {
+      Alert.alert(
+        "Password Requirements",
+        passwordValidation.errors.join("\n")
       );
       return;
     }
 
     try {
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: email.trim().toLowerCase(),
         password,
+        options: {
+          data: {
+            full_name: name.trim() || undefined,
+            language: "Krio",
+          },
+        },
       });
 
       if (error) {
@@ -40,13 +74,14 @@ export default function RegisterScreen() {
       } else {
         Alert.alert(
           "Success",
-          "Account created successfully! Please verify your email.",
+          "Account created successfully! Please verify your email before logging in."
         );
-        router.replace("/");
+        router.replace("/(auth)/login");
       }
     } catch (err) {
-      console.error("Registration error:", err);
-      Alert.alert("Error", "Something went wrong. Please try again.");
+      const errorMessage =
+        err instanceof Error ? err.message : "Unknown error occurred";
+      Alert.alert("Error", `Registration failed: ${errorMessage}`);
     }
   };
 
@@ -124,7 +159,11 @@ export default function RegisterScreen() {
             onPress={() => setTermsAccepted(!termsAccepted)}
           >
             <View
-              className={`w-6 h-6 rounded-md border-2 ${termsAccepted ? "bg-blue-600 border-blue-600" : "border-gray-300"} items-center justify-center`}
+              className={`w-6 h-6 rounded-md border-2 ${
+                termsAccepted
+                  ? "bg-blue-600 border-blue-600"
+                  : "border-gray-300"
+              } items-center justify-center`}
             >
               {termsAccepted && <Check size={16} color="white" />}
             </View>
@@ -138,7 +177,9 @@ export default function RegisterScreen() {
 
         {/* Sign Up Button */}
         <TouchableOpacity
-          className={`rounded-xl py-4 items-center mt-4 ${termsAccepted ? "bg-blue-600" : "bg-gray-300"}`}
+          className={`rounded-xl py-4 items-center mt-4 ${
+            termsAccepted ? "bg-blue-600" : "bg-gray-300"
+          }`}
           onPress={handleRegister}
           disabled={!termsAccepted}
         >

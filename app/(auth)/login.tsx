@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import { Chrome, Eye, EyeOff, Lock, Mail } from "lucide-react-native";
 import { useState } from "react";
 import {
+  Alert,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -14,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { validateEmail } from "../../lib/validation";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -23,30 +25,60 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      alert("Please enter your email and password");
+    // Validate email
+    if (!email || !email.trim()) {
+      Alert.alert("Validation Error", "Please enter your email address");
+      return;
+    }
+
+    if (!validateEmail(email)) {
+      Alert.alert("Validation Error", "Please enter a valid email address");
+      return;
+    }
+
+    // Validate password
+    if (!password || password.length === 0) {
+      Alert.alert("Validation Error", "Please enter your password");
       return;
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    setLoading(false);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
 
-    if (error) {
-      alert(error.message);
-    } else {
-      router.replace("/(tabs)");
+      if (error) {
+        Alert.alert("Login Error", error.message);
+      } else {
+        router.replace("/(tabs)");
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred";
+      Alert.alert("Error", `Login failed: ${errorMessage}`);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-    });
-    if (error) alert(error.message);
+    try {
+      setLoading(true);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+      });
+      if (error) {
+        throw new Error(error.message);
+      }
+      // Supabase will handle the redirect; no manual navigation needed here
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      Alert.alert("Google Sign-in Error", message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

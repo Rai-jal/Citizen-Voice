@@ -14,13 +14,26 @@ import {
   Alert,
   FlatList,
   Image,
+  RefreshControl,
   ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import { supabase } from "../../lib/supabase";
+import { OfflineBanner } from "../../components/OfflineBanner";
+import { useAuth } from "../../hooks/useAuth";
+import { useNews } from "../../hooks/useNews";
+import { useOpportunities } from "../../hooks/useOpportunities";
+import { useReports } from "../../hooks/useReports";
+import { useServices } from "../../hooks/useServices";
+import { storageService } from "../../services/supabaseService";
+import type {
+  News,
+  Opportunity,
+  ReportWithAttachments,
+  Service,
+} from "../../types";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -28,18 +41,40 @@ export default function HomeScreen() {
   const [isListening, setIsListening] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [user, setUser] = useState<any>(null);
+  // Use hooks for data fetching
+  const { user, signOut } = useAuth();
+  const {
+    news: allNews,
+    isLoading: loadingNews,
+    error: newsError,
+    refetch: refetchNews,
+  } = useNews();
+  const {
+    services: allServices,
+    isLoading: loadingServices,
+    error: servicesError,
+    refetch: refetchServices,
+  } = useServices();
+  const {
+    opportunities: allOpportunities,
+    isLoading: loadingOpportunities,
+    error: opportunitiesError,
+    refetch: refetchOpportunities,
+  } = useOpportunities();
+  const {
+    reports: allReports,
+    isLoading: loadingReports,
+    error: reportsError,
+    refetch: refetchReports,
+  } = useReports();
 
-  const [newsItems, setNewsItems] = useState<any[]>([]);
-  const [services, setServices] = useState<any[]>([]);
-  const [opportunities, setOpportunities] = useState<any[]>([]);
-  const [reports, setReports] = useState<any[]>([]);
-
-  const [loadingNews, setLoadingNews] = useState(true);
-  const [loadingServices, setLoadingServices] = useState(true);
-  const [loadingOpportunities, setLoadingOpportunities] = useState(true);
-  const [loadingReports, setLoadingReports] = useState(true);
+  // Filtered data based on search
+  const [newsItems, setNewsItems] = useState<News[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [reports, setReports] = useState<ReportWithAttachments[]>([]);
 
   const recordingOptions = {
     android: {
@@ -72,67 +107,85 @@ export default function HomeScreen() {
   };
 
   // -------------------------------
-  // Fetch User
+  // Update filtered data when search or data changes
   // -------------------------------
   useEffect(() => {
-    const fetchUser = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data?.user) router.replace("/(auth)/login");
-      else setUser(data.user);
-    };
-    fetchUser();
-  }, []);
+    if (searchQuery) {
+      const lower = searchQuery.toLowerCase();
+      setNewsItems(
+        allNews.filter(
+          (item) =>
+            item.title.toLowerCase().includes(lower) ||
+            item.summary.toLowerCase().includes(lower)
+        )
+      );
+      setServices(
+        allServices.filter(
+          (item) =>
+            item.name.toLowerCase().includes(lower) ||
+            item.description.toLowerCase().includes(lower)
+        )
+      );
+      setOpportunities(
+        allOpportunities.filter(
+          (item) =>
+            item.title.toLowerCase().includes(lower) ||
+            item.description.toLowerCase().includes(lower)
+        )
+      );
+      setReports(
+        allReports.filter(
+          (item) =>
+            item.title.toLowerCase().includes(lower) ||
+            item.description.toLowerCase().includes(lower)
+        )
+      );
+    } else {
+      setNewsItems(allNews);
+      setServices(allServices);
+      setOpportunities(allOpportunities);
+      setReports(allReports);
+    }
+  }, [searchQuery, allNews, allServices, allOpportunities, allReports]);
 
   // -------------------------------
-  // Fetch Data
+  // Handle errors
   // -------------------------------
   useEffect(() => {
-    fetchNews();
-    fetchServices();
-    fetchOpportunities();
-    fetchReports();
-  }, []);
+    if (newsError) {
+      Alert.alert("Error", `Failed to load news: ${newsError.message}`);
+    }
+    if (servicesError) {
+      Alert.alert("Error", `Failed to load services: ${servicesError.message}`);
+    }
+    if (opportunitiesError) {
+      Alert.alert(
+        "Error",
+        `Failed to load opportunities: ${opportunitiesError.message}`
+      );
+    }
+    if (reportsError) {
+      Alert.alert("Error", `Failed to load reports: ${reportsError.message}`);
+    }
+  }, [newsError, servicesError, opportunitiesError, reportsError]);
 
-  const fetchNews = async () => {
-    setLoadingNews(true);
-    const { data, error } = await supabase
-      .from("news")
-      .select("*")
-      .order("date", { ascending: false });
-    if (error) console.error(error);
-    setNewsItems(data || []);
-    setLoadingNews(false);
-  };
-
-  const fetchServices = async () => {
-    setLoadingServices(true);
-    const { data, error } = await supabase.from("services").select("*");
-    if (error) console.error(error);
-    setServices(data || []);
-    setLoadingServices(false);
-  };
-
-  const fetchOpportunities = async () => {
-    setLoadingOpportunities(true);
-    const { data, error } = await supabase
-      .from("opportunities")
-      .select("*")
-      .order("deadline", { ascending: true });
-    if (error) console.error(error);
-    setOpportunities(data || []);
-    setLoadingOpportunities(false);
-  };
-
-  const fetchReports = async () => {
-    setLoadingReports(true);
-    const { data, error } = await supabase
-      .from("reports")
-      .select("*")
-      .eq("status", "approved")
-      .order("created_at", { ascending: false });
-    if (error) console.error(error);
-    setReports(data || []);
-    setLoadingReports(false);
+  // -------------------------------
+  // Pull to refresh
+  // -------------------------------
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        refetchNews(),
+        refetchServices(),
+        refetchOpportunities(),
+        refetchReports(),
+      ]);
+    } catch (error) {
+      Alert.alert("Error", "Failed to refresh data");
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   // -------------------------------
@@ -140,17 +193,7 @@ export default function HomeScreen() {
   // -------------------------------
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    const lower = query.toLowerCase();
-
-    const filterItems = (items: any[], keys: string[]) =>
-      items.filter((item) =>
-        keys.some((key) => (item[key] ?? "").toLowerCase().includes(lower))
-      );
-
-    setNewsItems((prev) => filterItems(prev, ["title", "summary"]));
-    setServices((prev) => filterItems(prev, ["name", "description"]));
-    setOpportunities((prev) => filterItems(prev, ["title", "description"]));
-    setReports((prev) => filterItems(prev, ["title", "description"]));
+    // Filtering is handled in useEffect above
   };
 
   // -------------------------------
@@ -188,26 +231,23 @@ export default function HomeScreen() {
       const uri = recording.getURI()!;
       setRecording(null);
 
-      const formData = new FormData();
-      formData.append("file", {
-        uri,
-        name: "voice.wav",
-        type: "audio/wav",
-      } as any);
-      formData.append("model", "whisper-1");
+      // Use API service instead of direct OpenAI API call
+      // The API key is now securely stored in Supabase Edge Functions
+      const { transcribeAudio } = await import("../../lib/apiService");
+      const result = await transcribeAudio(uri);
 
-      const res = await fetch(
-        "https://api.openai.com/v1/audio/transcriptions",
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-          body: formData,
-        }
-      );
-      const data = await res.json();
-      if (data.text) handleSearch(data.text);
+      if (result.success && result.data?.text) {
+        handleSearch(result.data.text);
+      } else {
+        Alert.alert(
+          "Transcription Error",
+          result.error || "Failed to transcribe audio. Please try again."
+        );
+      }
     } catch (err) {
-      console.error(err);
+      const errorMessage =
+        err instanceof Error ? err.message : "Unknown error occurred";
+      Alert.alert("Error", `Failed to transcribe audio: ${errorMessage}`);
     } finally {
       setIsListening(false);
     }
@@ -217,64 +257,86 @@ export default function HomeScreen() {
   // Logout
   // -------------------------------
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
     setShowProfileMenu(false);
-    if (!error) router.replace("/(auth)/login");
+    const success = await signOut();
+    if (success) {
+      router.replace("/(auth)/login");
+    } else {
+      Alert.alert("Error", "Failed to logout");
+    }
   };
 
   // -------------------------------
   // Render Functions
   // -------------------------------
-  const renderReportItem = ({ item }: { item: any }) => (
-    <TouchableOpacity
-      onPress={() => router.push(`../report/${item.id}`)}
-      className="bg-white rounded-xl p-4 mb-4 shadow-sm border border-gray-100"
-    >
-      <Text className="text-lg font-bold text-gray-900 mb-2">{item.title}</Text>
-      <Text className="text-gray-700 mb-2">{item.description}</Text>
-      {item.location && (
-        <Text className="text-gray-500 text-sm">Location: {item.location}</Text>
-      )}
-      <Text className="text-gray-400 text-xs mb-2">
-        {item.is_anonymous
-          ? "Anonymous"
-          : `Submitted by User ID: ${item.user_id}`}
-      </Text>
+  const renderReportItem = ({ item }: { item: ReportWithAttachments }) => {
+    const getAttachmentUrl = (path: string) => {
+      if (path.startsWith("http")) return path;
+      return storageService.getPublicUrl("report-attachments", path);
+    };
 
-      {/* Attachments if any */}
-      {item.attachments && item.attachments.length > 0 && (
-        <ScrollView horizontal className="mb-2">
-          {item.attachments.map((att: any) => (
-            <View key={att.id} className="mr-3">
-              {att.type === "image" && (
-                <Image
-                  source={{ uri: att.path }}
-                  className="w-24 h-24 rounded-lg"
-                />
-              )}
-              {att.type === "video" && (
-                <View className="w-24 h-24 bg-black items-center justify-center rounded-lg">
-                  <VideoIcon size={24} color="white" />
-                </View>
-              )}
-              {att.type === "audio" && (
-                <View className="w-24 h-24 bg-green-100 items-center justify-center rounded-lg">
-                  <Mic size={24} color="green" />
-                </View>
-              )}
-              {att.type === "document" && (
-                <View className="w-24 h-24 bg-gray-100 items-center justify-center rounded-lg">
-                  <FileText size={24} color="gray" />
-                </View>
-              )}
-            </View>
-          ))}
-        </ScrollView>
-      )}
-    </TouchableOpacity>
-  );
+    return (
+      <TouchableOpacity
+        onPress={() => {
+          // Report detail view - can be implemented later
+          Alert.alert(
+            "Report Details",
+            `Title: ${item.title}\n\nDescription: ${item.description}`
+          );
+        }}
+        className="bg-white rounded-xl p-4 mb-4 shadow-sm border border-gray-100"
+      >
+        <Text className="text-lg font-bold text-gray-900 mb-2">
+          {item.title}
+        </Text>
+        <Text className="text-gray-700 mb-2">{item.description}</Text>
+        {item.location && (
+          <Text className="text-gray-500 text-sm">
+            Location: {item.location}
+          </Text>
+        )}
+        <Text className="text-gray-400 text-xs mb-2">
+          {item.is_anonymous
+            ? "Anonymous"
+            : `Submitted by User ID: ${item.user_id}`}
+        </Text>
 
-  const renderNewsItem = ({ item }: { item: any }) => (
+        {/* Attachments if any */}
+        {item.attachments && item.attachments.length > 0 && (
+          <ScrollView horizontal className="mb-2">
+            {item.attachments.map((att) => (
+              <View key={att.id} className="mr-3">
+                {att.type === "image" && (
+                  <Image
+                    source={{ uri: getAttachmentUrl(att.path) }}
+                    className="w-24 h-24 rounded-lg"
+                    onError={() => {}}
+                  />
+                )}
+                {att.type === "video" && (
+                  <View className="w-24 h-24 bg-black items-center justify-center rounded-lg">
+                    <VideoIcon size={24} color="white" />
+                  </View>
+                )}
+                {att.type === "audio" && (
+                  <View className="w-24 h-24 bg-green-100 items-center justify-center rounded-lg">
+                    <Mic size={24} color="green" />
+                  </View>
+                )}
+                {att.type === "document" && (
+                  <View className="w-24 h-24 bg-gray-100 items-center justify-center rounded-lg">
+                    <FileText size={24} color="gray" />
+                  </View>
+                )}
+              </View>
+            ))}
+          </ScrollView>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  const renderNewsItem = ({ item }: { item: News }) => (
     <TouchableOpacity
       onPress={() => router.push(`/news/${item.id}`)}
       className="bg-white rounded-xl p-4 mb-4 shadow-sm border border-gray-100"
@@ -285,7 +347,7 @@ export default function HomeScreen() {
     </TouchableOpacity>
   );
 
-  const renderServiceItem = ({ item }: { item: any }) => (
+  const renderServiceItem = ({ item }: { item: Service }) => (
     <View
       className="bg-white rounded-2xl p-4 items-center justify-center mr-3 shadow-md border border-gray-200"
       style={{ width: 140, height: 140 }}
@@ -302,7 +364,7 @@ export default function HomeScreen() {
     </View>
   );
 
-  const renderOpportunityItem = ({ item }: { item: any }) => (
+  const renderOpportunityItem = ({ item }: { item: Opportunity }) => (
     <View className="bg-white rounded-xl p-4 mb-4 border border-gray-100">
       <Text className="text-lg font-bold text-gray-900 mb-1">{item.title}</Text>
       <Text className="text-gray-700 mb-2">{item.organization}</Text>
@@ -322,6 +384,9 @@ export default function HomeScreen() {
   // -------------------------------
   return (
     <View className="flex-1 bg-gray-50">
+      {/* Offline Banner */}
+      <OfflineBanner />
+
       {/* Header */}
       <View className="bg-white pt-12 pb-4 px-6 shadow-sm">
         <View className="flex-row items-center justify-between mb-4">
@@ -416,7 +481,12 @@ export default function HomeScreen() {
       </View>
 
       {/* Content */}
-      <ScrollView className="flex-1 px-6 py-4">
+      <ScrollView
+        className="flex-1 px-6 py-4"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* News */}
         <View className="mb-8">
           <Text className="text-xl font-bold text-gray-900 mb-4">

@@ -6,36 +6,44 @@ import {
   ScrollView,
   Text,
   TouchableOpacity,
+  View,
 } from "react-native";
-import { supabase } from "../../lib/supabase";
+import { servicesService } from "../../services/supabaseService";
+import type { Service } from "../../types";
 
 export default function ServiceDetail() {
   const { id } = useLocalSearchParams() as { id: string };
   const router = useRouter();
-  const [service, setService] = useState<any>(null);
+  const [service, setService] = useState<Service | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!id) return;
 
     const fetchService = async () => {
-      const { data, error } = await supabase
-        .from("services")
-        .select("*")
-        .eq("id", id)
-        .single();
+      setIsLoading(true);
+      const { data, error } = await servicesService.getById(id);
 
       if (error) {
-        console.error("Error fetching service:", error);
-        Alert.alert("Error", "Could not fetch service.");
+        Alert.alert("Error", `Could not fetch service: ${error.message}`);
+        setService(null);
       } else {
         setService(data);
       }
+      setIsLoading(false);
     };
 
     fetchService();
   }, [id]);
 
-  if (!service) return <ActivityIndicator size="large" color="#3B82F6" />;
+  if (isLoading || !service) {
+    return (
+      <View className="flex-1 justify-center items-center bg-gray-50">
+        <ActivityIndicator size="large" color="#3B82F6" />
+        <Text className="text-gray-500 mt-4">Loading service...</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView className="p-6 bg-gray-50">

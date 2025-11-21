@@ -12,30 +12,28 @@ import {
 } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { ScrollView, Switch, Text, TouchableOpacity, View } from "react-native";
-import { supabase } from "../lib/supabase";
+import { useAuth } from "../hooks/useAuth";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const { user, isLoading, signOut } = useAuth();
   const [language, setLanguage] = useState("Krio");
   const [notifications, setNotifications] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
 
   useEffect(() => {
-    const fetchUser = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data?.user) router.replace("/(auth)/login");
-      else {
-        setUser(data.user);
-        setLanguage(data.user.user_metadata?.language || "Krio");
-      }
-    };
-    fetchUser();
-  }, []);
+    if (!isLoading && !user) {
+      router.replace("/(auth)/login");
+    } else if (user) {
+      setLanguage((user.user_metadata?.language as string) || "Krio");
+    }
+  }, [user, isLoading, router]);
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (!error) router.replace("/(auth)/login");
+    const success = await signOut();
+    if (success) {
+      router.replace("/(auth)/login");
+    }
   };
 
   const SettingsSection = ({
@@ -173,7 +171,14 @@ export default function SettingsPage() {
             icon={<Shield size={20} color="#3B82F6" />}
             title="Privacy Policy"
             showChevron
-            onPress={() => router.push("/")}
+            onPress={() => router.push("/privacy-policy")}
+          />
+          <View className="h-px bg-gray-100 mx-4" />
+          <SettingsItem
+            icon={<Shield size={20} color="#3B82F6" />}
+            title="Terms of Service"
+            showChevron
+            onPress={() => router.push("/terms-of-service")}
           />
           <View className="h-px bg-gray-100 mx-4" />
           <TouchableOpacity

@@ -6,36 +6,44 @@ import {
   ScrollView,
   Text,
   TouchableOpacity,
+  View,
 } from "react-native";
-import { supabase } from "../../lib/supabase";
+import { opportunitiesService } from "../../services/supabaseService";
+import type { Opportunity } from "../../types";
 
 export default function OpportunityDetail() {
   const { id } = useLocalSearchParams() as { id: string };
   const router = useRouter();
-  const [opportunity, setOpportunity] = useState<any>(null);
+  const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!id) return;
 
     const fetchOpportunity = async () => {
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("*")
-        .eq("id", id)
-        .single();
+      setIsLoading(true);
+      const { data, error } = await opportunitiesService.getById(id);
 
       if (error) {
-        console.error("Error fetching opportunity:", error);
-        Alert.alert("Error", "Could not fetch opportunity.");
+        Alert.alert("Error", `Could not fetch opportunity: ${error.message}`);
+        setOpportunity(null);
       } else {
         setOpportunity(data);
       }
+      setIsLoading(false);
     };
 
     fetchOpportunity();
   }, [id]);
 
-  if (!opportunity) return <ActivityIndicator size="large" color="#3B82F6" />;
+  if (isLoading || !opportunity) {
+    return (
+      <View className="flex-1 justify-center items-center bg-gray-50">
+        <ActivityIndicator size="large" color="#3B82F6" />
+        <Text className="text-gray-500 mt-4">Loading opportunity...</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView className="p-6 bg-gray-50">
