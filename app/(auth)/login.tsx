@@ -2,18 +2,19 @@ import { useRouter } from "expo-router";
 import { Chrome, Eye, EyeOff, Lock, Mail } from "lucide-react-native";
 import { useState } from "react";
 import {
-  Alert,
   Image,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   Text,
-  TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import { Button } from "../../components/Button";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { Input } from "../../components/Input";
 import { supabase } from "../../lib/supabase";
 import { validateEmail } from "../../lib/validation";
 
@@ -23,59 +24,64 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleLogin = async () => {
+    // Clear previous errors
+    setError("");
+
     // Validate email
     if (!email || !email.trim()) {
-      Alert.alert("Validation Error", "Please enter your email address");
+      setError("Please enter your email address");
       return;
     }
 
     if (!validateEmail(email)) {
-      Alert.alert("Validation Error", "Please enter a valid email address");
+      setError("Please enter a valid email address");
       return;
     }
 
     // Validate password
     if (!password || password.length === 0) {
-      Alert.alert("Validation Error", "Please enter your password");
+      setError("Please enter your password");
       return;
     }
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { error: authError } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password,
       });
 
-      if (error) {
-        Alert.alert("Login Error", error.message);
+      if (authError) {
+        setError(authError.message);
       } else {
         router.replace("/(tabs)");
       }
-    } catch (error) {
+    } catch (err) {
       const errorMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
-      Alert.alert("Error", `Login failed: ${errorMessage}`);
+        err instanceof Error ? err.message : "Unknown error occurred";
+      setError(`Login failed: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
+    setError("");
     try {
       setLoading(true);
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { error: authError } = await supabase.auth.signInWithOAuth({
         provider: "google",
       });
-      if (error) {
-        throw new Error(error.message);
+      if (authError) {
+        throw new Error(authError.message);
       }
       // Supabase will handle the redirect; no manual navigation needed here
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      Alert.alert("Google Sign-in Error", message);
+      setError(`Google Sign-in failed: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -96,61 +102,56 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
         >
           {/* Header with Logo */}
-          <View className="mb-12 items-center">
+          <View className="mb-8 items-center">
             <Image
-              source={require("../../assets/images/splash-icon.png")} // 👈 ensure your logo is placed here
+              source={require("../../assets/images/splash-icon.png")}
               style={{
-                width: 120,
-                height: 120,
-                marginBottom: 5,
+                width: 100,
+                height: 100,
+                marginBottom: 16,
                 resizeMode: "contain",
               }}
             />
             <Text className="text-3xl font-bold text-gray-900 mb-2">
               Welcome Back
             </Text>
-            <Text className="text-gray-500 text-center">
+            <Text className="text-base text-gray-600 text-center">
               Sign in to access citizen services
             </Text>
           </View>
 
+          {/* Error Message */}
+          {error && (
+            <ErrorMessage
+              message={error}
+              onDismiss={() => setError("")}
+            />
+          )}
+
           {/* Login Form */}
-          <View className="mb-8">
+          <View className="mb-6">
             {/* Email Input */}
-            <View className="mb-6">
-              <Text className="text-gray-700 mb-2 ml-1 font-medium">Email</Text>
-              <View className="flex-row items-center border border-gray-300 rounded-xl px-4 py-3 bg-gray-50">
-                <Mail size={20} color="#6B7280" className="mr-3" />
-                <TextInput
-                  className="flex-1 text-gray-800"
-                  placeholder="Enter your email"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-            </View>
+            <Input
+              label="Email"
+              leftIcon={<Mail size={20} color="#6B7280" />}
+              placeholder="you@example.com"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
 
             {/* Password Input */}
-            <View className="mb-2">
-              <Text className="text-gray-700 mb-2 ml-1 font-medium">
-                Password
-              </Text>
-              <View className="flex-row items-center border border-gray-300 rounded-xl px-4 py-3 bg-gray-50">
-                <Lock size={20} color="#6B7280" className="mr-3" />
-                <TextInput
-                  className="flex-1 text-gray-800"
-                  placeholder="Enter your password"
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!passwordVisible}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
+            <Input
+              label="Password"
+              leftIcon={<Lock size={20} color="#6B7280" />}
+              rightIcon={
                 <TouchableOpacity
                   onPress={() => setPasswordVisible(!passwordVisible)}
+                  className="p-2"
+                  accessibilityLabel={passwordVisible ? "Hide password" : "Show password"}
+                  accessibilityRole="button"
                 >
                   {passwordVisible ? (
                     <EyeOff size={20} color="#6B7280" />
@@ -158,57 +159,72 @@ export default function LoginScreen() {
                     <Eye size={20} color="#6B7280" />
                   )}
                 </TouchableOpacity>
-              </View>
-            </View>
+              }
+              placeholder="Enter your password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!passwordVisible}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
 
             {/* Forgot Password */}
-            <View className="items-end my-4">
+            <View className="items-end mb-6">
               <TouchableOpacity
                 onPress={() => router.push("/(auth)/forgot_password")}
+                className="py-2"
+                accessibilityLabel="Forgot password"
+                accessibilityRole="button"
               >
-                <Text className="text-blue-600 font-medium">
+                <Text className="text-blue-600 font-semibold text-base">
                   Forgot Password?
                 </Text>
               </TouchableOpacity>
             </View>
 
             {/* Login Button */}
-            <TouchableOpacity
-              className="bg-blue-600 rounded-xl py-4 items-center mt-4"
+            <Button
+              variant="primary"
+              size="lg"
+              fullWidth
               onPress={handleLogin}
-              disabled={loading}
+              loading={loading}
             >
-              <Text className="text-white font-bold text-lg">
-                {loading ? "Logging in..." : "Log In"}
-              </Text>
-            </TouchableOpacity>
+              Log In
+            </Button>
           </View>
 
           {/* Divider */}
-          <View className="flex-row items-center my-8">
+          <View className="flex-row items-center my-6">
             <View className="flex-1 h-px bg-gray-300" />
-            <Text className="text-gray-500 mx-4">or continue with</Text>
+            <Text className="text-sm text-gray-500 mx-4">or continue with</Text>
             <View className="flex-1 h-px bg-gray-300" />
           </View>
 
           {/* Google Login */}
           <View className="mb-8">
-            <TouchableOpacity
-              className="flex-row items-center justify-center border border-gray-300 rounded-xl py-4"
+            <Button
+              variant="outline"
+              size="lg"
+              fullWidth
               onPress={handleGoogleLogin}
+              icon={<Chrome size={20} color="#4285F4" />}
+              disabled={loading}
             >
-              <Chrome size={24} color="#4285F4" className="mr-3" />
-              <Text className="text-gray-700 font-medium">
-                Log in with Google
-              </Text>
-            </TouchableOpacity>
+              Log in with Google
+            </Button>
           </View>
 
           {/* Sign Up Link */}
-          <View className="flex-row justify-center">
-            <Text className="text-gray-600">Don't have an account? </Text>
-            <TouchableOpacity onPress={() => router.push("/(auth)/register")}>
-              <Text className="text-blue-600 font-medium">Register</Text>
+          <View className="flex-row justify-center items-center">
+            <Text className="text-base text-gray-600">Don't have an account? </Text>
+            <TouchableOpacity
+              onPress={() => router.push("/(auth)/register")}
+              className="py-2 px-1"
+              accessibilityLabel="Register for new account"
+              accessibilityRole="button"
+            >
+              <Text className="text-blue-600 font-semibold text-base">Register</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
